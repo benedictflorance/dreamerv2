@@ -46,6 +46,8 @@ class Plan2Explore(common.Module):
     self.opt = common.Optimizer('expl', **config.expl_opt)
     self.extr_rewnorm = common.StreamNorm(**self.config.expl_reward_norm)
     self.intr_rewnorm = common.StreamNorm(**self.config.expl_reward_norm)
+    self.mets_intr = {}
+    self.mets_extr = {}
 
   def train(self, start, context, data):
     metrics = {}
@@ -66,6 +68,9 @@ class Plan2Explore(common.Module):
     metrics.update(self._train_ensemble(inputs, target))
     metrics.update(self.ac.train(
         self.wm, start, data['is_terminal'], self._intr_reward))
+    mets1 = {f'intr_reward_{k}': v for k, v in self.mets_intr.items()}
+    mets2 = {f'extr_reward_{k}': v for k, v in self.mets_extr.items()}
+    metrics.update(**mets1, **mets2)
     return None, metrics
 
   def _intr_reward(self, seq):
@@ -77,10 +82,16 @@ class Plan2Explore(common.Module):
     disag = tf.tensor(preds).std(0).mean(-1)
     if self.config.disag_log:
       disag = tf.math.log(disag)
-    reward = self.config.expl_intr_scale * self.intr_rewnorm(disag)[0]
+    intr_rewnorm = self.intr_rewnorm(disag)
+    intr_reward = self.config.expl_intr_scale * intr_rewnorm[0]
+    self.mets_intr = intr_rewnorm[1]
+    reward = intr_reward
+    self.mets_extr = {}
     if self.config.expl_extr_scale:
-      reward += self.config.expl_extr_scale * self.extr_rewnorm(
-          self.reward(seq))[0]
+      extr_rewnorm = self.extr_rewnorm(self.reward(seq))
+      extr_reward = self.config.expl_extr_scale * extr_rewnorm[0]
+      self.mets_extr = extr_rewnorm[1]
+      reward += extr_reward
     return reward
 
   def _train_ensemble(self, inputs, targets):
